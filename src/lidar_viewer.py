@@ -34,6 +34,13 @@ POINT_SIZE = 4
 SCAN_TIMEOUT = 3                   # seconds
 DANGER_MM = 304.8                  # 1 foot in millimeters
 
+# Motor PWM range exposed by the rplidar library.
+# 0 = off, 1023 = maximum. Library default is 660 (~5.5 Hz scan rate).
+# Below ~200 the motor may not spin up reliably.
+MOTOR_PWM_MIN = 200
+MOTOR_PWM_MAX = 1023
+MOTOR_PWM_DEFAULT = 660
+
 
 def auto_detect_port():
     """Try to find the LiDAR's serial port across OSes. Returns None if none found."""
@@ -63,6 +70,10 @@ def parse_args():
                         help=f"Baud rate (default {DEFAULT_BAUDRATE})")
     parser.add_argument("--max-distance", type=int, default=DEFAULT_MAX_DISTANCE_MM,
                         help="Max plot extent in mm (default 6000)")
+    parser.add_argument("--motor-speed", type=int, default=MOTOR_PWM_DEFAULT,
+                        help=f"Motor PWM speed, {MOTOR_PWM_MIN}-{MOTOR_PWM_MAX} "
+                             f"(default {MOTOR_PWM_DEFAULT}). Higher = faster refresh "
+                             f"but fewer points per revolution.")
     return parser.parse_args()
 
 
@@ -72,6 +83,10 @@ def main():
     if not port:
         sys.exit("ERROR: no serial port specified and none auto-detected. "
                  "Pass one with --port (e.g. /dev/cu.usbserial-0001 or COM3).")
+
+    if not MOTOR_PWM_MIN <= args.motor_speed <= MOTOR_PWM_MAX:
+        sys.exit(f"ERROR: --motor-speed must be between {MOTOR_PWM_MIN} "
+                 f"and {MOTOR_PWM_MAX} (got {args.motor_speed}).")
 
     print(f"Connecting to RPLIDAR on {port} @ {args.baud} baud...")
     lidar = RPLidar(port, baudrate=args.baud, timeout=SCAN_TIMEOUT)
@@ -87,6 +102,15 @@ def main():
         lidar.stop()
         lidar.disconnect()
         sys.exit(f"ERROR talking to LiDAR: {e}")
+
+    # Apply motor speed. We have to set the property AND call start_motor()
+    # for the PWM value to actually be written to the device.
+    print(f"Setting motor speed to PWM {args.motor_speed}"
+          f"(default {MOTOR_PWM_DEFAULT}, range {MOTOR_PWM_MIN}-{MOTOR_PWM_MAX})...")
+    lidar.motor_speed = args.motor_speed
+    lidar.start_motor()
+    import time
+    time.sleep(1.5)  # let the motor settle at the new speed
 
     # ---------- Matplotlib setup ----------
     plt.style.use("dark_background")
